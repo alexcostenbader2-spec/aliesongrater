@@ -631,19 +631,19 @@ window.dispatchEvent(new Event('firebase-ready'));
   </div>
   <button class="btn btn-primary mt16" onclick="backToHome()">Play Again</button>
 </div>
-
 <script>
+
 let db, _ref, _set, _get, _onValue, _update, _push, _remove;
+
 let lobbyCode = '';
 let myName = '';
 let myRole = '';
 let myPlayerId = '';
+
 let currentRound = 0;
-let myGuess = 5;
-let hostRating = 5;
+
 let listeners = [];
 
-// Track state on host side for enabling reveal button
 let _guessCache = {};
 let _playerCache = {};
 
@@ -657,10 +657,11 @@ const RATING_DESCS = {
   7: 'Solid bop.',
   8: 'Really good!',
   9: 'Genuinely love this.',
-  10: 'Absolute masterpiece.',
+  10: 'Absolute masterpiece.'
 };
 
 window.addEventListener('firebase-ready', () => {
+
   db = window._db;
   _ref = window._ref;
   _set = window._set;
@@ -671,471 +672,757 @@ window.addEventListener('firebase-ready', () => {
   _remove = window._remove;
 
   const params = new URLSearchParams(window.location.search);
+
   const code = params.get('lobby');
+
   if (code) {
-    document.getElementById('join-code').value = code.toUpperCase();
+
+    document.getElementById('join-code').value =
+      code.toUpperCase();
+
     document.getElementById('join-name').focus();
   }
 });
 
 function showScreen(id) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById('screen-' + id).classList.add('active');
+
+  document
+    .querySelectorAll('.screen')
+    .forEach(s => s.classList.remove('active'));
+
+  document
+    .getElementById('screen-' + id)
+    .classList.add('active');
 }
 
 function genCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  return Array.from({length: 6}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+
+  const chars =
+    'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+  return Array.from(
+    { length: 6 },
+    () => chars[Math.floor(Math.random() * chars.length)]
+  ).join('');
 }
 
 function genId() {
-  return Math.random().toString(36).substr(2, 9);
+
+  return Math.random()
+    .toString(36)
+    .substr(2, 9);
 }
 
 function detachListeners() {
+
   listeners.forEach(fn => fn && fn());
+
   listeners = [];
 }
 
-// ─── HOST: Create Lobby ───
+
+// HOST CREATE LOBBY
+
 async function hostCreateLobby() {
-  const name = document.getElementById('host-name').value.trim();
-  if (!name) { alert('Enter your name!'); return; }
-  if (!db) { alert('Firebase not ready yet, try again in a second.'); return; }
+
+  const name =
+    document.getElementById('host-name')
+    .value
+    .trim();
+
+  if (!name) {
+    alert('Enter your name!');
+    return;
+  }
 
   myName = name;
   myRole = 'host';
+
   lobbyCode = genCode();
 
-  await _set(_ref(db, 'lobbies/' + lobbyCode), {
-    host: name,
-    status: 'waiting',
-    round: 0,
-    hostRating: null,
-    createdAt: Date.now()
-  });
+  await _set(
+    _ref(db, 'lobbies/' + lobbyCode),
+    {
+      host: name,
+      status: 'waiting',
+      round: 0,
+      hostRating: null,
+      createdAt: Date.now()
+    }
+  );
 
   setupHostLobby();
 }
 
 function setupHostLobby() {
-  const url = window.location.origin + window.location.pathname + '?lobby=' + lobbyCode;
-  document.getElementById('display-code').textContent = lobbyCode;
-  document.getElementById('display-url').textContent = url;
-  const qrDiv = document.getElementById('qrcode');
+
+  const url =
+    window.location.origin +
+    window.location.pathname +
+    '?lobby=' +
+    lobbyCode;
+
+  document.getElementById('display-code').textContent =
+    lobbyCode;
+
+  document.getElementById('display-url').textContent =
+    url;
+
+  const qrDiv =
+    document.getElementById('qrcode');
+
   qrDiv.innerHTML = '';
-  new QRCode(qrDiv, { text: url, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.M });
+
+  new QRCode(qrDiv, {
+    text: url,
+    width: 180,
+    height: 180
+  });
 
   showScreen('host-lobby');
 
   detachListeners();
-  const playersRef = _ref(db, 'lobbies/' + lobbyCode + '/players');
-  const unsub = _onValue(playersRef, snap => {
-    const players = snap.val() || {};
-    renderPlayersLobby(players);
-  });
+
+  const playersRef =
+    _ref(db, 'lobbies/' + lobbyCode + '/players');
+
+  const unsub =
+    _onValue(playersRef, snap => {
+
+      const players = snap.val() || {};
+
+      renderPlayersLobby(players);
+    });
+
   listeners.push(unsub);
 }
 
 function renderPlayersLobby(players) {
-  const list = document.getElementById('players-list');
-  const keys = Object.keys(players);
-  document.getElementById('player-count').textContent = keys.length;
+
+  const list =
+    document.getElementById('players-list');
+
+  const keys =
+    Object.keys(players);
+
+  document.getElementById('player-count').textContent =
+    keys.length;
+
   if (keys.length === 0) {
-    list.innerHTML = '<div class="empty-state">Waiting for players to join…</div>';
+
+    list.innerHTML =
+      '<div class="empty-state">Waiting for players to join…</div>';
+
     return;
   }
+
   list.innerHTML = keys.map(k => `
+
     <div class="player-chip">
+
       <div class="player-dot"></div>
+
       <span>${players[k].name}</span>
-      <span class="player-score">${players[k].score || 0} pts</span>
+
+      <span class="player-score">
+        ${players[k].score || 0} pts
+      </span>
+
     </div>
+
   `).join('');
 }
 
-// ─── HOST: Start Round ───
+
+// HOST START ROUND
+
 async function hostStartRound() {
+
   currentRound++;
 
-  // status: 'rating' means players should guess, host is rating
-  await _update(_ref(db, 'lobbies/' + lobbyCode), {
-    status: 'rating',
-    round: currentRound,
-    hostRating: null,
-    roundReveal: false
-  });
+  await _set(
+    _ref(db, 'lobbies/' + lobbyCode + '/guesses'),
+    {}
+  );
 
-  // Clear previous guesses
-  await _set(_ref(db, 'lobbies/' + lobbyCode + '/guesses'), null);
+  const playersSnap =
+    await _get(
+      _ref(db, 'lobbies/' + lobbyCode + '/players')
+    );
+
+  const players =
+    playersSnap.val() || {};
+
+  const resetUpdates = {};
+
+  for (const pid in players) {
+
+    resetUpdates[
+      `lobbies/${lobbyCode}/players/${pid}/lastGuess`
+    ] = null;
+
+    resetUpdates[
+      `lobbies/${lobbyCode}/players/${pid}/lastPts`
+    ] = null;
+  }
+
+  await _update(_ref(db), resetUpdates);
+
+  await _update(
+    _ref(db, 'lobbies/' + lobbyCode),
+    {
+      status: 'rating',
+      round: currentRound,
+      hostRating: null,
+      roundReveal: false
+    }
+  );
 
   detachListeners();
+
   showScreen('host-rating');
+
   document.getElementById('host-slider').value = 5;
+
   updateHostSlider(5);
 
-  // Reset reveal button state
-  _guessCache = {};
-  _playerCache = {};
-  document.getElementById('submit-rating-btn').disabled = true;
-  document.getElementById('reveal-hint').textContent = 'Waiting for all players to guess…';
-  document.getElementById('force-reveal-btn').style.display = 'none';
-  document.getElementById('all-in-badge').style.display = 'none';
+  const guessRef =
+    _ref(db, 'lobbies/' + lobbyCode + '/guesses');
 
-  const guessRef = _ref(db, 'lobbies/' + lobbyCode + '/guesses');
-  const playersRef = _ref(db, 'lobbies/' + lobbyCode + '/players');
+  const playersRef =
+    _ref(db, 'lobbies/' + lobbyCode + '/players');
 
-  const u1 = _onValue(playersRef, snap => {
-    _playerCache = snap.val() || {};
-    updateWaitingList(_guessCache, _playerCache);
-  });
-  const u2 = _onValue(guessRef, snap => {
-    _guessCache = snap.val() || {};
-    updateWaitingList(_guessCache, _playerCache);
-  });
+  const u1 =
+    _onValue(playersRef, snap => {
+
+      _playerCache = snap.val() || {};
+
+      updateWaitingList(
+        _guessCache,
+        _playerCache
+      );
+    });
+
+  const u2 =
+    _onValue(guessRef, snap => {
+
+      _guessCache = snap.val() || {};
+
+      updateWaitingList(
+        _guessCache,
+        _playerCache
+      );
+    });
+
   listeners.push(u1, u2);
 }
 
 function updateWaitingList(guesses, players) {
-  const pKeys = Object.keys(players);
-  const gKeys = Object.keys(guesses);
-  const responded = gKeys.length;
-  const total = pKeys.length;
 
-  document.getElementById('response-count').textContent = responded;
-  document.getElementById('response-total').textContent = total;
+  const pKeys =
+    Object.keys(players);
 
-  const allIn = total > 0 && responded >= total;
-  const revealBtn = document.getElementById('submit-rating-btn');
-  const hintEl = document.getElementById('reveal-hint');
-  const allInBadge = document.getElementById('all-in-badge');
-  const forceBtn = document.getElementById('force-reveal-btn');
+  const gKeys =
+    Object.keys(guesses);
 
-  if (allIn) {
-    // All players have guessed — unlock the reveal button
+  const responded =
+    gKeys.length;
+
+  const total =
+    pKeys.length;
+
+  document.getElementById('response-count').textContent =
+    responded;
+
+  document.getElementById('response-total').textContent =
+    total;
+
+  const revealBtn =
+    document.getElementById('submit-rating-btn');
+
+  if (
+    total > 0 &&
+    responded >= total
+  ) {
+
     revealBtn.disabled = false;
-    hintEl.textContent = 'All players have guessed!';
-    allInBadge.style.display = 'inline-block';
-    forceBtn.style.display = 'none';
-  } else if (total > 0 && responded > 0) {
-    // Some have guessed — enable force reveal
-    revealBtn.disabled = true;
-    hintEl.textContent = `${responded} of ${total} guessed — waiting for the rest…`;
-    forceBtn.style.display = 'block';
-    allInBadge.style.display = 'none';
+
   } else {
+
     revealBtn.disabled = true;
-    hintEl.textContent = total === 0 ? 'No players in the lobby.' : 'Waiting for all players to guess…';
-    forceBtn.style.display = 'none';
-    allInBadge.style.display = 'none';
   }
 
-  // Waiting list
-  const waitingEl = document.getElementById('waiting-players');
-  if (pKeys.length === 0) {
-    waitingEl.innerHTML = '<div class="empty-state">No players yet</div>';
-    return;
-  }
-  waitingEl.innerHTML = pKeys.map(k => {
-    const hasGuessed = guesses[k] !== undefined;
-    return `<div class="player-chip">
-      <div class="player-dot" style="background:${hasGuessed ? 'var(--accent3)' : 'var(--muted)'};box-shadow:${hasGuessed ? '0 0 8px var(--accent3)' : 'none'}"></div>
-      <span>${players[k].name}</span>
-      <span style="margin-left:auto;font-size:0.75rem;color:var(--muted)">${hasGuessed ? '✓ guessed' : 'thinking…'}</span>
-    </div>`;
-  }).join('');
+  const waitingEl =
+    document.getElementById('waiting-players');
+
+  waitingEl.innerHTML =
+    pKeys.map(k => {
+
+      const guessed =
+        guesses[k] !== undefined &&
+        guesses[k] !== null;
+
+      return `
+        <div class="player-chip">
+
+          <div
+            class="player-dot"
+            style="
+              background:${guessed ? 'var(--accent3)' : 'var(--muted)'};
+            ">
+          </div>
+
+          <span>${players[k].name}</span>
+
+          <span
+            style="
+              margin-left:auto;
+              color:var(--muted);
+              font-size:0.75rem;
+            ">
+            ${guessed ? '✓ guessed' : 'thinking…'}
+          </span>
+
+        </div>
+      `;
+    }).join('');
 }
 
-function goToHostLobby() {
-  detachListeners();
-  // Reset status back to waiting so players go back to lobby screen
-  _update(_ref(db, 'lobbies/' + lobbyCode), { status: 'waiting' });
-  setupHostLobby();
-}
 
-// ─── HOST: Force Reveal (some players haven't guessed yet) ───
-async function hostForceReveal() {
-  if (!confirm('Reveal now even though not everyone has guessed?')) return;
-  document.getElementById('submit-rating-btn').disabled = false;
-  document.getElementById('force-reveal-btn').style.display = 'none';
-  document.getElementById('reveal-hint').textContent = 'Force reveal — locking in rating…';
-  await hostSubmitRating();
-}
+// HOST SUBMIT RATING
 
-// ─── HOST: Submit Rating & Reveal ───
 async function hostSubmitRating() {
-  const rating = parseInt(document.getElementById('host-slider').value);
-  hostRating = rating;
 
-  // Mark as results — players will see the reveal screen
-  await _update(_ref(db, 'lobbies/' + lobbyCode), {
-    hostRating: rating,
-    status: 'results',
-    roundReveal: true
-  });
+  const rating =
+    parseInt(
+      document.getElementById('host-slider').value
+    );
 
-  // Calculate scores
-  const guessSnap = await _get(_ref(db, 'lobbies/' + lobbyCode + '/guesses'));
-  const guesses = guessSnap.val() || {};
-  const playersSnap = await _get(_ref(db, 'lobbies/' + lobbyCode + '/players'));
-  const players = playersSnap.val() || {};
+  await _update(
+    _ref(db, 'lobbies/' + lobbyCode),
+    {
+      hostRating: rating,
+      status: 'results',
+      roundReveal: true
+    }
+  );
+
+  const guessSnap =
+    await _get(
+      _ref(db, 'lobbies/' + lobbyCode + '/guesses')
+    );
+
+  const guesses =
+    guessSnap.val() || {};
+
+  const playersSnap =
+    await _get(
+      _ref(db, 'lobbies/' + lobbyCode + '/players')
+    );
+
+  const players =
+    playersSnap.val() || {};
 
   const updates = {};
+
   for (const pid in players) {
-    const guess = guesses[pid] !== undefined ? guesses[pid] : null;
+
+    const guess = guesses[pid];
+
     let pts = 0;
-    if (guess !== null) {
-      const diff = Math.abs(guess - rating);
+
+    if (
+      guess !== undefined &&
+      guess !== null
+    ) {
+
+      const diff =
+        Math.abs(guess - rating);
+
       if (diff === 0) pts = 2;
       else if (diff <= 2) pts = 1;
     }
-    const cur = players[pid].score || 0;
-    updates[`lobbies/${lobbyCode}/players/${pid}/score`] = cur + pts;
-    updates[`lobbies/${lobbyCode}/players/${pid}/lastGuess`] = guess;
-    updates[`lobbies/${lobbyCode}/players/${pid}/lastPts`] = pts;
+
+    updates[
+      `lobbies/${lobbyCode}/players/${pid}/score`
+    ] =
+      (players[pid].score || 0) + pts;
+
+    updates[
+      `lobbies/${lobbyCode}/players/${pid}/lastGuess`
+    ] = guess;
+
+    updates[
+      `lobbies/${lobbyCode}/players/${pid}/lastPts`
+    ] = pts;
   }
+
   await _update(_ref(db), updates);
 
-  showHostResults(rating, guesses, players);
+  showHostResults();
 }
 
-function showHostResults(rating, guesses, players) {
-  detachListeners();
-  document.getElementById('reveal-host-rating').textContent = rating;
-  showScreen('host-results');
+async function showHostResults() {
 
-  _get(_ref(db, 'lobbies/' + lobbyCode + '/players')).then(snap => {
-    const updatedPlayers = snap.val() || {};
-    const list = document.getElementById('host-results-list');
-    const rows = Object.keys(updatedPlayers).map(pid => {
-      const p = updatedPlayers[pid];
-      const guess = p.lastGuess !== undefined && p.lastGuess !== null ? p.lastGuess : '—';
-      const pts = p.lastPts || 0;
-      const diff = guess !== '—' ? Math.abs(guess - rating) : 99;
-      const cls = diff === 0 ? 'exact' : diff <= 2 ? 'close' : 'miss';
-      return { name: p.name, guess, pts, score: p.score || 0, cls };
-    }).sort((a, b) => b.score - a.score);
+  const snap =
+    await _get(
+      _ref(db, 'lobbies/' + lobbyCode + '/players')
+    );
 
-    list.innerHTML = rows.map(r => `
-      <div class="result-row ${r.cls}">
-        <span class="result-name">${r.name}</span>
-        <span class="result-guess">guessed ${r.guess}</span>
-        <span class="result-pts ${r.pts === 2 ? 'pts-2' : r.pts === 1 ? 'pts-1' : 'pts-0'}">+${r.pts}</span>
-        <span style="color:var(--accent);font-family:'Syne',sans-serif;font-weight:700">${r.score}</span>
+  const players =
+    snap.val() || {};
+
+  const lobbySnap =
+    await _get(
+      _ref(db, 'lobbies/' + lobbyCode)
+    );
+
+  const lobby =
+    lobbySnap.val();
+
+  document.getElementById('reveal-host-rating').textContent =
+    lobby.hostRating;
+
+  const list =
+    document.getElementById('host-results-list');
+
+  const rows =
+    Object.values(players)
+    .sort((a,b)=>(b.score||0)-(a.score||0));
+
+  list.innerHTML =
+    rows.map(p => `
+      <div class="result-row">
+
+        <span class="result-name">
+          ${p.name}
+        </span>
+
+        <span class="result-guess">
+          guessed ${p.lastGuess ?? '—'}
+        </span>
+
+        <span class="result-pts">
+          +${p.lastPts || 0}
+        </span>
+
+        <span class="player-score">
+          ${p.score || 0}
+        </span>
+
       </div>
     `).join('');
-  });
+
+  showScreen('host-results');
 }
 
-// ─── HOST: Next Round ───
-// Key fix: go back to 'waiting' lobby state ONLY on the host side.
-// Players currently on results screen will stay there until a new round starts
-// (status 'rating'). We set status='lobby' to act as a holding state.
+
+// NEXT ROUND
+
 async function hostNextRound() {
-  // 'lobby' status = between rounds; players stay on results until 'rating' fires
-  await _update(_ref(db, 'lobbies/' + lobbyCode), {
-    status: 'lobby',
-    roundReveal: false,
-    hostRating: null
-  });
+
   detachListeners();
+
   setupHostLobby();
 }
 
-// ─── HOST: End Game ───
-async function endGame() {
-  if (!lobbyCode) { backToHome(); return; }
-  await _update(_ref(db, 'lobbies/' + lobbyCode), { status: 'gameover' });
 
-  const snap = await _get(_ref(db, 'lobbies/' + lobbyCode + '/players'));
-  const players = snap.val() || {};
-  showFinalScores(players);
-}
+// PLAYER JOIN
 
-function showFinalScores(players) {
-  detachListeners();
-  const list = document.getElementById('final-scores');
-  const sorted = Object.values(players).sort((a, b) => (b.score || 0) - (a.score || 0));
-  list.innerHTML = sorted.map((p, i) => `
-    <div class="result-row" style="border-left:3px solid ${i === 0 ? 'var(--accent)' : i === 1 ? 'var(--accent3)' : 'var(--muted)'}">
-      <span class="result-name">${['🥇','🥈','🥉'][i] || (i+1)+'.'} ${p.name}</span>
-      <span class="result-pts pts-2">${p.score || 0} pts</span>
-    </div>
-  `).join('');
-  showScreen('gameover');
-}
-
-// ─── PLAYER: Join Lobby ───
 async function playerJoinLobby() {
-  const name = document.getElementById('join-name').value.trim();
-  const code = document.getElementById('join-code').value.trim().toUpperCase();
-  if (!name) { alert('Enter your name!'); return; }
-  if (code.length !== 6) { alert('Enter a 6-character lobby code!'); return; }
-  if (!db) { alert('Firebase not ready yet, try again in a second.'); return; }
 
-  const snap = await _get(_ref(db, 'lobbies/' + code));
-  if (!snap.exists()) { alert('Lobby not found! Check the code.'); return; }
+  const name =
+    document.getElementById('join-name')
+    .value
+    .trim();
+
+  const code =
+    document.getElementById('join-code')
+    .value
+    .trim()
+    .toUpperCase();
+
+  if (!name || code.length !== 6) {
+    alert('Enter valid info!');
+    return;
+  }
+
+  const snap =
+    await _get(
+      _ref(db, 'lobbies/' + code)
+    );
+
+  if (!snap.exists()) {
+    alert('Lobby not found!');
+    return;
+  }
 
   myName = name;
   myRole = 'player';
   lobbyCode = code;
+
   myPlayerId = genId();
 
-  await _set(_ref(db, 'lobbies/' + lobbyCode + '/players/' + myPlayerId), {
-    name: myName,
-    score: 0,
-    joinedAt: Date.now()
-  });
+  await _set(
+    _ref(
+      db,
+      'lobbies/' +
+      lobbyCode +
+      '/players/' +
+      myPlayerId
+    ),
+    {
+      name: myName,
+      score: 0
+    }
+  );
 
-  document.getElementById('player-self-name-display').textContent = myName;
+  document.getElementById(
+    'player-self-name-display'
+  ).textContent = myName;
+
   setupPlayerListeners();
+
   showScreen('player-lobby');
 }
 
 function setupPlayerListeners() {
+
   detachListeners();
-  const lobbyRef = _ref(db, 'lobbies/' + lobbyCode);
-  const unsub = _onValue(lobbyRef, snap => {
-    const data = snap.val();
-    if (!data) return;
-    handleLobbyState(data);
-  });
+
+  const lobbyRef =
+    _ref(db, 'lobbies/' + lobbyCode);
+
+  const unsub =
+    _onValue(lobbyRef, snap => {
+
+      const data =
+        snap.val();
+
+      if (!data) return;
+
+      handleLobbyState(data);
+    });
+
   listeners.push(unsub);
 }
 
 function handleLobbyState(data) {
-  const status = data.status;
-  const roundReveal = data.roundReveal;
-  const currentScreen = document.querySelector('.screen.active')?.id;
 
-  // Update player list sidebar whenever data arrives
-  if (data.players) {
-    const players = data.players;
-    const pList = document.getElementById('player-lobby-list');
-    pList.innerHTML = Object.values(players).map(p => `
-      <div class="player-chip">
-        <div class="player-dot"></div>
-        <span>${p.name}</span>
-        <span class="player-score">${p.score || 0} pts</span>
-      </div>
-    `).join('') || '<div class="empty-state">Just you so far…</div>';
+  const status =
+    data.status;
+
+  if (status === 'results') {
+
+    showPlayerResults(data);
+
+    return;
+  }
+
+  if (status === 'rating') {
+
+    const myGuess =
+      data.guesses &&
+      data.guesses[myPlayerId];
+
+    if (
+      myGuess !== undefined &&
+      myGuess !== null
+    ) {
+
+      document.getElementById('player-locked-guess').textContent =
+        myGuess;
+
+      showScreen('player-waiting');
+
+    } else {
+
+      document.getElementById('submit-guess-btn').disabled =
+        false;
+
+      document.getElementById('player-slider').value =
+        5;
+
+      updatePlayerSlider(5);
+
+      showScreen('player-guess');
+    }
+
+    return;
   }
 
   if (status === 'gameover') {
+
     showFinalScores(data.players || {});
+
     return;
   }
 
-  // Host revealed — show results
-  if (status === 'results' && roundReveal) {
-    if (currentScreen !== 'screen-player-results') {
-      showPlayerResults(data);
-    }
-    return;
-  }
-
-  // New round starting — send players to guess screen
-  if (status === 'rating') {
-    if (currentScreen === 'screen-player-lobby' || currentScreen === 'screen-player-results') {
-      // Reset guess button
-      document.getElementById('submit-guess-btn').disabled = false;
-      const myGuessData = data.guesses && data.guesses[myPlayerId];
-      if (myGuessData !== undefined) {
-        // Already submitted (e.g. reconnect mid-round)
-        document.getElementById('player-locked-guess').textContent = myGuessData;
-        showScreen('player-waiting');
-      } else {
-        document.getElementById('player-slider').value = 5;
-        updatePlayerSlider(5);
-        showScreen('player-guess');
-      }
-    }
-    return;
-  }
-
-  // 'lobby' or 'waiting' = between rounds, players stay where they are
-  // (on results screen if they just finished, or lobby if fresh)
-  if (status === 'waiting' || status === 'lobby') {
-    // Only move to lobby screen if they haven't already seen results
-    // If they're on results, keep them there until a new round fires
-    if (currentScreen !== 'screen-player-results') {
-      showScreen('player-lobby');
-    }
-  }
+  showScreen('player-lobby');
 }
 
-function showPlayerResults(data) {
-  const hr = data.hostRating;
-  const players = data.players || {};
-  const me = players[myPlayerId];
-  const myGuessVal = me?.lastGuess;
-  const diff = myGuessVal !== undefined && myGuessVal !== null ? Math.abs(myGuessVal - hr) : 99;
 
-  document.getElementById('player-reveal-host-rating').textContent = hr;
-  document.getElementById('player-reveal-guess').textContent =
-    myGuessVal !== undefined && myGuessVal !== null ? myGuessVal : '—';
+// PLAYER SUBMIT
 
-  let verdict = '';
-  if (myGuessVal === null || myGuessVal === undefined) {
-    verdict = '<span style="color:var(--muted)">No guess submitted</span>';
-  } else if (diff === 0) {
-    verdict = '<span style="color:var(--accent)">⭐ Exact match! +2 points</span>';
-  } else if (diff <= 2) {
-    verdict = '<span style="color:var(--accent3)">Close! +1 point</span>';
-  } else {
-    verdict = '<span style="color:var(--muted)">Not quite. +0 points</span>';
-  }
-  document.getElementById('player-reveal-verdict').innerHTML = verdict;
-
-  const sorted = Object.values(players).sort((a, b) => (b.score || 0) - (a.score || 0));
-  const resList = document.getElementById('player-results-list');
-  resList.innerHTML = sorted.map((p, i) => {
-    const isMe = p.name === myName;
-    return `<div class="result-row" style="${isMe ? 'background:rgba(232,255,87,0.05);' : ''}border-left:3px solid ${i === 0 ? 'var(--accent)' : 'var(--muted)'}">
-      <span class="result-name">${p.name}${isMe ? ' <span style="color:var(--muted);font-size:0.7rem">(you)</span>' : ''}</span>
-      <span style="color:var(--muted);font-size:0.75rem">+${p.lastPts || 0}</span>
-      <span style="color:var(--accent);font-family:\'Syne\',sans-serif;font-weight:700">${p.score || 0}</span>
-    </div>`;
-  }).join('');
-
-  showScreen('player-results');
-}
-
-// ─── PLAYER: Submit Guess ───
 async function playerSubmitGuess() {
-  const btn = document.getElementById('submit-guess-btn');
-  if (btn.disabled) return;
+
+  const btn =
+    document.getElementById('submit-guess-btn');
+
   btn.disabled = true;
 
-  const guess = parseInt(document.getElementById('player-slider').value);
-  myGuess = guess;
-  document.getElementById('player-locked-guess').textContent = guess;
+  const guess =
+    parseInt(
+      document.getElementById('player-slider').value
+    );
 
-  await _set(_ref(db, 'lobbies/' + lobbyCode + '/guesses/' + myPlayerId), guess);
+  await _set(
+    _ref(
+      db,
+      'lobbies/' +
+      lobbyCode +
+      '/guesses/' +
+      myPlayerId
+    ),
+    guess
+  );
+
+  document.getElementById('player-locked-guess').textContent =
+    guess;
 
   showScreen('player-waiting');
 }
 
-// ─── Sliders ───
+
+// PLAYER RESULTS
+
+function showPlayerResults(data) {
+
+  const players =
+    data.players || {};
+
+  const me =
+    players[myPlayerId];
+
+  document.getElementById('player-reveal-host-rating').textContent =
+    data.hostRating;
+
+  document.getElementById('player-reveal-guess').textContent =
+    me?.lastGuess ?? '—';
+
+  const diff =
+    me?.lastGuess !== undefined
+      ? Math.abs(me.lastGuess - data.hostRating)
+      : 999;
+
+  let verdict = '';
+
+  if (diff === 0) {
+    verdict = '⭐ Exact Match! +2';
+  } else if (diff <= 2) {
+    verdict = 'Close! +1';
+  } else {
+    verdict = 'No points';
+  }
+
+  document.getElementById('player-reveal-verdict').textContent =
+    verdict;
+
+  const list =
+    document.getElementById('player-results-list');
+
+  const rows =
+    Object.values(players)
+    .sort((a,b)=>(b.score||0)-(a.score||0));
+
+  list.innerHTML =
+    rows.map(p => `
+      <div class="result-row">
+
+        <span class="result-name">
+          ${p.name}
+        </span>
+
+        <span>
+          +${p.lastPts || 0}
+        </span>
+
+        <span class="player-score">
+          ${p.score || 0}
+        </span>
+
+      </div>
+    `).join('');
+
+  showScreen('player-results');
+}
+
+
+// GAME OVER
+
+function showFinalScores(players) {
+
+  const list =
+    document.getElementById('final-scores');
+
+  const rows =
+    Object.values(players)
+    .sort((a,b)=>(b.score||0)-(a.score||0));
+
+  list.innerHTML =
+    rows.map((p,i)=>`
+      <div class="result-row">
+
+        <span class="result-name">
+          ${i+1}. ${p.name}
+        </span>
+
+        <span class="player-score">
+          ${p.score || 0}
+        </span>
+
+      </div>
+    `).join('');
+
+  showScreen('gameover');
+}
+
+
+// SLIDERS
+
 function updateHostSlider(val) {
+
   val = parseInt(val);
-  document.getElementById('host-rating-display').textContent = val;
-  document.getElementById('host-rating-desc').textContent = RATING_DESCS[val] || '';
+
+  document.getElementById('host-rating-display').textContent =
+    val;
+
+  document.getElementById('host-rating-desc').textContent =
+    RATING_DESCS[val];
 }
 
 function updatePlayerSlider(val) {
+
   val = parseInt(val);
-  document.getElementById('player-rating-display').textContent = val;
-  document.getElementById('player-rating-desc').textContent = RATING_DESCS[val] || '';
+
+  document.getElementById('player-rating-display').textContent =
+    val;
+
+  document.getElementById('player-rating-desc').textContent =
+    RATING_DESCS[val];
 }
 
+
+// BACK HOME
+
 function backToHome() {
+
   detachListeners();
-  lobbyCode = '';
-  myRole = '';
-  myPlayerId = '';
+
   showScreen('home');
 }
+
 </script>
+
 </body>
 </html>
